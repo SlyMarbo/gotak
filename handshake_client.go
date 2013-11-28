@@ -11,12 +11,15 @@ import (
 	"crypto/subtle"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"io"
 	"strconv"
 )
 
-func (c *Conn) clientHandshake() error {
+func (c *Conn) clientHandshake() (*Diagnostics, error) {
 	finishedHash := newFinishedHash(versionTLS10)
+
+	diag := new(Diagnostics)
 
 	if c.config == nil {
 		c.config = defaultConfig()
@@ -42,7 +45,7 @@ func (c *Conn) clientHandshake() error {
 	_, err := io.ReadFull(c.config.rand(), hello.random[4:])
 	if err != nil {
 		c.sendAlert(alertInternalError)
-		return errors.New("short read from Rand")
+		return nil, errors.New("short read from Rand")
 	}
 
 	finishedHash.Write(hello.marshal())
@@ -50,43 +53,52 @@ func (c *Conn) clientHandshake() error {
 
 	msg, err := c.readHandshake()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	serverHello, ok := msg.(*serverHelloMsg)
 	if !ok {
-		return c.sendAlert(alertUnexpectedMessage)
+		return nil, c.sendAlert(alertUnexpectedMessage)
 	}
 	finishedHash.Write(serverHello.marshal())
 
 	vers, ok := mutualVersion(serverHello.vers)
 	if !ok || vers < versionTLS10 {
 		// TLS 1.0 is the minimum version supported as a client.
-		return c.sendAlert(alertProtocolVersion)
+		return nil, c.sendAlert(alertProtocolVersion)
 	}
 	c.vers = vers
 	c.haveVers = true
 
+	v, err := cryptVersTlsToGotak(serverHello.vers)
+	if err != nil {
+		fmt.Println(err)
+	} else {
+		diag.Version = v
+	}
+
 	if serverHello.compressionMethod != compressionNone {
-		return c.sendAlert(alertUnexpectedMessage)
+		return nil, c.sendAlert(alertUnexpectedMessage)
 	}
 
 	if !hello.nextProtoNeg && serverHello.nextProtoNeg {
 		c.sendAlert(alertHandshakeFailure)
-		return errors.New("server advertised unrequested NPN")
+		return nil, errors.New("server advertised unrequested NPN")
 	}
 
 	suite := mutualCipherSuite(c.config.cipherSuites(), serverHello.cipherSuite)
 	if suite == nil {
-		return c.sendAlert(alertHandshakeFailure)
+		return nil, c.sendAlert(alertHandshakeFailure)
 	}
+
+	diag.CipherSuite = suite.String()
 
 	msg, err = c.readHandshake()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	certMsg, ok := msg.(*certificateMsg)
 	if !ok || len(certMsg.certificates) == 0 {
-		return c.sendAlert(alertUnexpectedMessage)
+		return nil, c.sendAlert(alertUnexpectedMessage)
 	}
 	finishedHash.Write(certMsg.marshal())
 
@@ -95,7 +107,7 @@ func (c *Conn) clientHandshake() error {
 		cert, err := x509.ParseCertificate(asn1Data)
 		if err != nil {
 			c.sendAlert(alertBadCertificate)
-			return errors.New("failed to parse certificate from server: " + err.Error())
+			return nil, errors.New("failed to parse certificate from server: " + err.Error())
 		}
 		certs[i] = cert
 	}
@@ -117,24 +129,25 @@ func (c *Conn) clientHandshake() error {
 		c.verifiedChains, err = certs[0].Verify(opts)
 		if err != nil {
 			c.sendAlert(alertBadCertificate)
-			return err
+			return nil, err
 		}
 	}
 
 	if _, ok := certs[0].PublicKey.(*rsa.PublicKey); !ok {
-		return c.sendAlert(alertUnsupportedCertificate)
+		return nil, c.sendAlert(alertUnsupportedCertificate)
 	}
 
 	c.peerCertificates = certs
+	diag.Certificates = certs
 
 	if serverHello.ocspStapling {
 		msg, err = c.readHandshake()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		cs, ok := msg.(*certificateStatusMsg)
 		if !ok {
-			return c.sendAlert(alertUnexpectedMessage)
+			return nil, c.sendAlert(alertUnexpectedMessage)
 		}
 		finishedHash.Write(cs.marshal())
 
@@ -145,7 +158,7 @@ func (c *Conn) clientHandshake() error {
 
 	msg, err = c.readHandshake()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	keyAgreement := suite.ka()
@@ -156,12 +169,12 @@ func (c *Conn) clientHandshake() error {
 		err = keyAgreement.processServerKeyExchange(c.config, hello, serverHello, certs[0], skx)
 		if err != nil {
 			c.sendAlert(alertUnexpectedMessage)
-			return err
+			return nil, err
 		}
 
 		msg, err = c.readHandshake()
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -206,7 +219,8 @@ func (c *Conn) clientHandshake() error {
 			if leaf == nil {
 				if leaf, err = x509.ParseCertificate(cert.Certificate[0]); err != nil {
 					c.sendAlert(alertInternalError)
-					return errors.New("tls: failed to parse client certificate #" + strconv.Itoa(i) + ": " + err.Error())
+					return nil, errors.New("tls: failed to parse client certificate #" +
+						strconv.Itoa(i) + ": " + err.Error())
 				}
 			}
 
@@ -231,13 +245,13 @@ func (c *Conn) clientHandshake() error {
 
 		msg, err = c.readHandshake()
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	shd, ok := msg.(*serverHelloDoneMsg)
 	if !ok {
-		return c.sendAlert(alertUnexpectedMessage)
+		return nil, c.sendAlert(alertUnexpectedMessage)
 	}
 	finishedHash.Write(shd.marshal())
 
@@ -256,7 +270,7 @@ func (c *Conn) clientHandshake() error {
 	preMasterSecret, ckx, err := keyAgreement.generateClientKeyExchange(c.config, hello, certs[0])
 	if err != nil {
 		c.sendAlert(alertInternalError)
-		return err
+		return nil, err
 	}
 	if ckx != nil {
 		finishedHash.Write(ckx.marshal())
@@ -270,7 +284,7 @@ func (c *Conn) clientHandshake() error {
 		digest = finishedHash.serverSHA1.Sum(digest)
 		signed, err := rsa.SignPKCS1v15(c.config.rand(), c.config.Certificates[0].PrivateKey.(*rsa.PrivateKey), crypto.MD5SHA1, digest)
 		if err != nil {
-			return c.sendAlert(alertInternalError)
+			return nil, c.sendAlert(alertInternalError)
 		}
 		certVerify.signature = signed
 
@@ -289,6 +303,10 @@ func (c *Conn) clientHandshake() error {
 
 	if serverHello.nextProtoNeg {
 		nextProto := new(nextProtoMsg)
+		diag.NpnStrings = make([]string, len(serverHello.nextProtos))
+		for i, s := range serverHello.nextProtos {
+			diag.NpnStrings[i] = s
+		}
 		proto, fallback := mutualProtocol(c.config.NextProtos, serverHello.nextProtos)
 		nextProto.proto = proto
 		c.clientProtocol = proto
@@ -308,27 +326,28 @@ func (c *Conn) clientHandshake() error {
 	c.in.prepareCipherSpec(c.vers, serverCipher, serverHash)
 	c.readRecord(recordTypeChangeCipherSpec)
 	if err := c.error(); err != nil {
-		return err
+		return nil, err
 	}
 
 	msg, err = c.readHandshake()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	serverFinished, ok := msg.(*finishedMsg)
 	if !ok {
-		return c.sendAlert(alertUnexpectedMessage)
+		return nil, c.sendAlert(alertUnexpectedMessage)
 	}
 
 	verify := finishedHash.serverSum(masterSecret)
 	if len(verify) != len(serverFinished.verifyData) ||
 		subtle.ConstantTimeCompare(verify, serverFinished.verifyData) != 1 {
-		return c.sendAlert(alertHandshakeFailure)
+		return nil, c.sendAlert(alertHandshakeFailure)
 	}
 
 	c.handshakeComplete = true
 	c.cipherSuite = suite.id
-	return nil
+	c.diagnostics = diag
+	return diag, nil
 }
 
 // mutualProtocol finds the mutual Next Protocol Negotiation protocol given the

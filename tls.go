@@ -83,11 +83,11 @@ func Listen(network, laddr string, config *Config) (net.Listener, error) {
 // Dial interprets a nil configuration as equivalent to
 // the zero configuration; see the documentation of Config
 // for the defaults.
-func Dial(network, addr string, config *Config) (*Conn, error) {
+func Dial(network, addr string, config *Config) (*Conn, *Diagnostics, error) {
 	raddr := addr
 	c, err := net.Dial(network, raddr)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	colonPos := strings.LastIndex(raddr, ":")
@@ -108,11 +108,12 @@ func Dial(network, addr string, config *Config) (*Conn, error) {
 		config = &c
 	}
 	conn := Client(c, config)
-	if err = conn.Handshake(); err != nil {
+	var diag *Diagnostics
+	if diag, err = conn.Handshake(); err != nil {
 		c.Close()
-		return nil, err
+		return nil, nil, err
 	}
-	return conn, nil
+	return conn, diag, nil
 }
 
 // LoadX509KeyPair reads and parses a public/private key pair from a pair of

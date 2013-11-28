@@ -10,6 +10,7 @@ import (
 	"crypto/subtle"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"io"
 )
 
@@ -25,10 +26,11 @@ type serverHandshakeState struct {
 	finishedHash    finishedHash
 	masterSecret    []byte
 	certsFromClient [][]byte
+	diag            *Diagnostics
 }
 
 // serverHandshake performs a TLS handshake as a server.
-func (c *Conn) serverHandshake() error {
+func (c *Conn) serverHandshake() (*Diagnostics, error) {
 	config := c.config
 
 	// If this is the first server handshake, we generate a random key to
@@ -40,47 +42,56 @@ func (c *Conn) serverHandshake() error {
 	}
 	isResume, err := hs.readClientHello()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// For an overview of TLS handshaking, see https://tools.ietf.org/html/rfc5246#section-7.3
 	if isResume {
 		// The client has included a session ticket and so we do an abbreviated handshake.
 		if err := hs.doResumeHandshake(); err != nil {
-			return err
+			return nil, err
 		}
 		if err := hs.establishKeys(); err != nil {
-			return err
+			return nil, err
 		}
 		if err := hs.sendFinished(); err != nil {
-			return err
+			return nil, err
 		}
 		if err := hs.readFinished(); err != nil {
-			return err
+			return nil, err
 		}
 		c.didResume = true
 	} else {
 		// The client didn't include a session ticket, or it wasn't
 		// valid so we do a full handshake.
 		if err := hs.doFullHandshake(); err != nil {
-			return err
+			return nil, err
 		}
 		if err := hs.establishKeys(); err != nil {
-			return err
+			return nil, err
 		}
 		if err := hs.readFinished(); err != nil {
-			return err
+			return nil, err
 		}
 		if err := hs.sendSessionTicket(); err != nil {
-			return err
+			return nil, err
 		}
 		if err := hs.sendFinished(); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	c.handshakeComplete = true
 
-	return nil
+	c.diagnostics = new(Diagnostics)
+	if v, err := cryptVersTlsToGotak(hs.c.vers); err != nil {
+		fmt.Println(err)
+	} else {
+		c.diagnostics.Version = v
+	}
+	c.diagnostics.CipherSuite = hs.suite.String()
+	c.diagnostics.NPN = hs.clientHello.nextProtoNeg
+
+	return c.diagnostics, nil
 }
 
 // readClientHello reads a ClientHello message from the client and decides
@@ -236,6 +247,8 @@ func (hs *serverHandshakeState) checkForResumption() bool {
 func (hs *serverHandshakeState) doResumeHandshake() error {
 	c := hs.c
 
+	hs.diag.CipherSuite = hs.suite.String()
+
 	hs.hello.cipherSuite = hs.suite.id
 	// We echo the client's session ID in the ServerHello to let it know
 	// that we're doing a resumption.
@@ -271,6 +284,7 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 	}
 
 	hs.hello.ticketSupported = hs.clientHello.ticketSupported && !config.SessionTicketsDisabled
+	hs.diag.CipherSuite = hs.suite.String()
 	hs.hello.cipherSuite = hs.suite.id
 	hs.finishedHash.Write(hs.hello.marshal())
 	c.writeRecord(recordTypeHandshake, hs.hello.marshal())

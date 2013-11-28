@@ -54,6 +54,8 @@ type Conn struct {
 	hand     bytes.Buffer // handshake data waiting to be read
 
 	tmp [16]byte
+
+	diagnostics *Diagnostics
 }
 
 type connErr struct {
@@ -747,7 +749,7 @@ func (c *Conn) Write(b []byte) (int, error) {
 		return 0, err
 	}
 
-	if err := c.Handshake(); err != nil {
+	if _, err := c.Handshake(); err != nil {
 		return 0, c.setError(err)
 	}
 
@@ -785,7 +787,7 @@ func (c *Conn) Write(b []byte) (int, error) {
 // Read can be made to time out and return a net.Error with Timeout() == true
 // after a fixed time limit; see SetDeadline and SetReadDeadline.
 func (c *Conn) Read(b []byte) (n int, err error) {
-	if err = c.Handshake(); err != nil {
+	if _, err = c.Handshake(); err != nil {
 		return
 	}
 
@@ -829,14 +831,14 @@ func (c *Conn) Close() error {
 // protocol if it has not yet been run.
 // Most uses of this package need not call Handshake
 // explicitly: the first Read or Write will call it automatically.
-func (c *Conn) Handshake() error {
+func (c *Conn) Handshake() (*Diagnostics, error) {
 	c.handshakeMutex.Lock()
 	defer c.handshakeMutex.Unlock()
 	if err := c.error(); err != nil {
-		return err
+		return nil, err
 	}
 	if c.handshakeComplete {
-		return nil
+		return c.diagnostics, nil
 	}
 	if c.isClient {
 		return c.clientHandshake()

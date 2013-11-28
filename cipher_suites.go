@@ -51,6 +51,29 @@ type cipherSuite struct {
 	mac      func(version uint16, macKey []byte) macFunction
 }
 
+func (c *cipherSuite) String() string {
+	switch c.id {
+	case TLS_RSA_WITH_RC4_128_SHA:
+		return "RSA with RC4 128 SHA"
+	case TLS_RSA_WITH_3DES_EDE_CBC_SHA:
+		return "RSA with 3DES EDE CBC SHA"
+	case TLS_RSA_WITH_AES_128_CBC_SHA:
+		return "RSA with AES 128 CBC SHA"
+	case TLS_RSA_WITH_AES_256_CBC_SHA:
+		return "RSA with AES 256 CBC SHA"
+	case TLS_ECDHE_RSA_WITH_RC4_128_SHA:
+		return "ECDHE RSA with RC4 128 SHA"
+	case TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA:
+		return "ECDHE RSA with 3DES EDE CBC SHA"
+	case TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA:
+		return "ECDHE RSA with AES 128 CBC SHA"
+	case TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA:
+		return "ECDHE RSA with AES 256 CBC SHA"
+	default:
+		return ""
+	}
+}
+
 var cipherSuites = []*cipherSuite{
 	{TLS_RSA_WITH_RC4_128_SHA, 16, 20, 0, rsaKA, false, cipherRC4, macSHA1},
 	{TLS_RSA_WITH_3DES_EDE_CBC_SHA, 24, 20, 8, rsaKA, false, cipher3DES, macSHA1},
