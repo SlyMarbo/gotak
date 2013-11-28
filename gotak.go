@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httputil"
+	"strings"
 )
 
 type TlsVersion uint16
@@ -39,6 +42,37 @@ func cryptVersTlsToGotak(vers uint16) (TlsVersion, error) {
 	default:
 		return 0, fmt.Errorf("Error: Could not parse version %d.", vers)
 	}
+}
+
+func Diagnose(addr string, config *Config) (*Diagnostics, error) {
+	if config == nil {
+		config = new(Config)
+		config.NextProtos = []string{"http/1.1"}
+	}
+
+	if !strings.Contains(addr, ":") {
+		addr = addr + ":443"
+	}
+
+	conn, diag, err := Dial("tcp", addr, config)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	clientConn := httputil.NewClientConn(conn, nil)
+
+	req, err := http.NewRequest("HEAD", "/", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = clientConn.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	return diag, nil
 }
 
 type Diagnostics struct {
