@@ -72,6 +72,10 @@ func Diagnose(addr string, config *Config) (*Diagnostics, error) {
 		return nil, err
 	}
 
+	if diag.NpnStrings != nil {
+		diag.NPN = true
+	}
+
 	return diag, nil
 }
 
