@@ -33,11 +33,11 @@ func (t TlsVersion) String() string {
 
 func cryptVersTlsToGotak(vers uint16) (TlsVersion, error) {
 	switch vers {
-	case 0x0300, 0x0301:
+	case VersionSSL30, VersionTLS10:
 		return TLS_1_0, nil
-	case 0x0302:
+	case VersionTLS11:
 		return TLS_1_1, nil
-	case 0x0303:
+	case VersionTLS12:
 		return TLS_1_2, nil
 	default:
 		return 0, fmt.Errorf("Error: Could not parse version %d.", vers)
