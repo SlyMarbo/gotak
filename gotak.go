@@ -59,6 +59,8 @@ func DiagnoseRequest(r *http.Request, config *Config) (*Diagnostics, error) {
 		config.NextProtos = []string{"http/1.1"}
 	}
 
+	addr := r.URL.Host
+
 	if !strings.Contains(addr, ":") {
 		addr = addr + ":443"
 	}
