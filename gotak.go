@@ -10,6 +10,103 @@ import (
 	"strings"
 )
 
+type Diagnostics struct {
+	Version      TlsVersion
+	CipherSuite  string
+	Certificates []*x509.Certificate
+	NPN          bool
+	NpnStrings   []string
+}
+
+func Diagnose(addr string, config *Config) (*Diagnostics, error) {
+	if config == nil {
+		config = new(Config)
+		config.NextProtos = []string{"http/1.1"}
+	}
+
+	if !strings.Contains(addr, ":") {
+		addr = addr + ":443"
+	}
+
+	conn, diag, err := Dial("tcp", addr, config)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	clientConn := httputil.NewClientConn(conn, nil)
+
+	req, err := http.NewRequest("GET", "/favicon.ico", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = clientConn.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if diag.NpnStrings != nil {
+		diag.NPN = true
+	}
+
+	return diag, nil
+}
+
+func DiagnoseRequest(r *http.Request, config *Config) (*Diagnostics, error) {
+	if config == nil {
+		config = new(Config)
+		config.NextProtos = []string{"http/1.1"}
+	}
+
+	if !strings.Contains(addr, ":") {
+		addr = addr + ":443"
+	}
+
+	conn, diag, err := Dial("tcp", addr, config)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	clientConn := httputil.NewClientConn(conn, nil)
+
+	_, err = clientConn.Do(r)
+	if err != nil {
+		return nil, err
+	}
+
+	if diag.NpnStrings != nil {
+		diag.NPN = true
+	}
+
+	return diag, nil
+}
+
+func (d *Diagnostics) JSON() ([]byte, error) {
+	jd := new(jsonDiagnostics)
+	jd.Version = d.Version.String()
+	jd.CipherSuite = d.CipherSuite
+	jd.NPN = d.NpnStrings
+
+	return json.Marshal(jd)
+}
+
+func (d *Diagnostics) EncodeJSON(w io.Writer) error {
+	jd := new(jsonDiagnostics)
+	jd.Version = d.Version.String()
+	jd.CipherSuite = d.CipherSuite
+	jd.NPN = d.NpnStrings
+
+	return json.NewEncoder(w).Encode(jd)
+}
+
+type jsonDiagnostics struct {
+	Version     string   `json:"version"`
+	CipherSuite string   `json:"cipher_suite"`
+	NPN         []string `json:"next_protocol_negotiation,omitempty"`
+}
+
 type TlsVersion uint16
 
 const (
@@ -42,71 +139,4 @@ func cryptVersTlsToGotak(vers uint16) (TlsVersion, error) {
 	default:
 		return 0, fmt.Errorf("Error: Could not parse version %d.", vers)
 	}
-}
-
-func Diagnose(addr string, config *Config) (*Diagnostics, error) {
-	if config == nil {
-		config = new(Config)
-		config.NextProtos = []string{"http/1.1"}
-	}
-
-	if !strings.Contains(addr, ":") {
-		addr = addr + ":443"
-	}
-
-	conn, diag, err := Dial("tcp", addr, config)
-	if err != nil {
-		return nil, err
-	}
-	defer conn.Close()
-
-	clientConn := httputil.NewClientConn(conn, nil)
-
-	req, err := http.NewRequest("HEAD", "/", nil)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = clientConn.Do(req)
-	if err != nil {
-		return nil, err
-	}
-
-	if diag.NpnStrings != nil {
-		diag.NPN = true
-	}
-
-	return diag, nil
-}
-
-type Diagnostics struct {
-	Version      TlsVersion
-	CipherSuite  string
-	Certificates []*x509.Certificate
-	NPN          bool
-	NpnStrings   []string
-}
-
-func (d *Diagnostics) JSON() ([]byte, error) {
-	jd := new(jsonDiagnostics)
-	jd.Version = d.Version.String()
-	jd.CipherSuite = d.CipherSuite
-	jd.NPN = d.NpnStrings
-
-	return json.Marshal(jd)
-}
-
-func (d *Diagnostics) EncodeJSON(w io.Writer) error {
-	jd := new(jsonDiagnostics)
-	jd.Version = d.Version.String()
-	jd.CipherSuite = d.CipherSuite
-	jd.NPN = d.NpnStrings
-
-	return json.NewEncoder(w).Encode(jd)
-}
-
-type jsonDiagnostics struct {
-	Version     string   `json:"version"`
-	CipherSuite string   `json:"cipher_suite"`
-	NPN         []string `json:"next_protocol_negotiation,omitempty"`
 }
