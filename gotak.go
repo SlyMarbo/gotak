@@ -41,10 +41,7 @@ func Diagnose(addr string, config *Config) (*Diagnostics, error) {
 		return nil, err
 	}
 
-	_, err = clientConn.Do(req)
-	if err != nil {
-		return nil, err
-	}
+	clientConn.Do(req)
 
 	if diag.NpnStrings != nil {
 		diag.NPN = true
@@ -73,10 +70,7 @@ func DiagnoseRequest(r *http.Request, config *Config) (*Diagnostics, error) {
 
 	clientConn := httputil.NewClientConn(conn, nil)
 
-	_, err = clientConn.Do(r)
-	if err != nil {
-		return nil, err
-	}
+	clientConn.Do(r)
 
 	if diag.NpnStrings != nil {
 		diag.NPN = true
